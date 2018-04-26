@@ -1,0 +1,131 @@
+<?php
+
+/**
+ * @file
+ * revlinks module install file.
+ */
+
+require_once('revlinks.api.inc');
+
+/**
+ * Implements hook_schema().
+ *
+ * {@inheritdoc}
+ */
+function revlinks_schema() {
+  $schema = array();
+  $schema['revlinks'] = array(
+    'description' => 'The base table for Revlinks entities.',
+    'fields' => array(
+        'revlink_id' => array(
+          'description' => 'Primary Key: Identifier for a Revlink.',
+          'type' => 'serial',
+          'unsigned' => TRUE,
+          'not null' => TRUE,
+        ),
+        'parsed_nid' => array(
+          'description' => 'Node id of parsed page.',
+          'type' => 'int',
+          'length' => 10,
+          'unsigned' => TRUE,
+          'not null' => TRUE,
+          'default' => 0,
+        ),
+        'parsed_path' => array(
+          'description' => 'URL of parsed page.',
+          'type' => 'text',
+          'not null' => TRUE,
+        ),
+        'parsed_title' => array(
+          'description' => 'Title of parsed page.',
+          'type' => 'text',
+          'not null' => TRUE,
+        ),
+        'parsed_type' => array(
+          'description' => 'Content type of parsed node.',
+          'type' => 'text',
+          'not null' => TRUE,
+        ),
+        'link_title' => array(
+          'description' => 'Parsed link title.',
+          'type' => 'text',
+          'not null' => TRUE,
+        ),
+        'link_url' => array(
+          'description' => 'Parsed link url.',
+          'type' => 'text',
+          'not null' => TRUE,
+        ),
+        'created' => array(
+          'description' => 'The Unix timestamp when the Revlink was created.',
+          'type' => 'int',
+          'not null' => TRUE,
+          'default' => 0,
+        ),
+      ),
+    'indexes' => array(
+      'node_created' => array('created'),
+     ),
+      'unique keys' => array(
+        'revlink_id' => array('revlink_id'),
+      ),
+    'primary key' => array('revlink_id'),
+  );
+  $schema['revlinks_pages'] = array(
+    'description' => 'Pages to parse while in update mode for Revlinks module.',
+    'fields' => array(
+      'id' => array(
+        'description' => 'Primary Key: Identifier for a page to parse.',
+        'type' => 'serial',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+      ),
+      'path' => array(
+        'description' => 'Relative URL of page to parse.',
+        'type' => 'text',
+        'not null' => TRUE,
+      ),
+      'nid' => array(
+        'description' => 'Node id of page to parse if exists. Zero if no nid.',
+        'type' => 'int',
+        'length' => 10,
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'title' => array(
+        'description' => 'Title of page to parse.',
+        'type' => 'text',
+        'not null' => TRUE,
+      ),
+      'type' => array(
+        'description' => 'Content type of page to parse.',
+        'type' => 'text',
+        'not null' => TRUE,
+      ),
+      'changed' => array(
+        'description' => 'The Unix timestamp when the page was created/updated and added here on save.',
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+    ),
+    'indexes' => array(
+      'node_changed' => array('changed'),
+    ),
+    'unique keys' => array(
+      'id' => array('id'),
+    ),
+    'primary key' => array('id'),
+  );
+  return $schema;
+}
+
+/**
+ * Implements hook_uninstall().
+ *
+ * {@inheritdoc}
+ */
+function revlinks_uninstall() {
+  revlinks_delete_variables();
+}

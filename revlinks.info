@@ -1,0 +1,5 @@
+name = Revlinks
+description = "Reverse links data collection and reporting."
+core = 7.x
+configure = admin/config/search/revlinks
+dependencies[] = composer_manager

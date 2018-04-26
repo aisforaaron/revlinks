@@ -1,0 +1,229 @@
+<?php
+
+/**
+ * @file
+ * Drupal hook implementations
+ */
+
+require_once 'revlinks.api.inc';
+require_once 'revlinks.batch.inc';
+require_once 'revlinks.sql.inc';
+
+/**
+ * Implements hook_permission().
+ *
+ * {@inheritdoc}
+ */
+function revlinks_permission() {
+  return array(
+    'administer revlinks' => array(
+      'title' => t('Administer Revlinks'),
+      'description' => t('Edit configuration for Revlinks.'),
+    ),
+    'view revlinks' => array(
+      'title' => t('View Revlinks'),
+      'description' => t('View access for Revlinks reporting.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ *
+ * {@inheritdoc}
+ */
+function revlinks_menu() {
+  $items = array();
+  $items['admin/config/search/revlinks'] = array(
+    'title' => 'Revlinks',
+    'description' => 'Revlinks',
+    'page callback' => 'revlinks_get_reports_tab',
+    'access arguments' => array('administer revlinks'),
+    'file' => 'revlinks.admin.inc',
+  );
+  $items['admin/config/search/revlinks/reports'] = array(
+    'title' => 'Reports',
+    'weight' => 1,
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+  );
+  $items['admin/config/search/revlinks/settings'] = array(
+    'title' => 'Settings',
+    'description' => 'Settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('revlinks_get_settings_tab'),
+    'access arguments' => array('administer revlinks'),
+    'file' => 'revlinks.admin.inc',
+    'weight' => 2,
+    'type' => MENU_LOCAL_TASK,
+  );
+  // Add tab to node pages
+  $items['node/%node/revlinks'] = array(
+    'title' => 'Revlinks',
+    'page callback' => 'revlinks_get_report_page',
+    'page arguments' => array(1),
+    'access arguments' => array('view revlinks'),
+    'theme callback' => 'variable_get',
+    'theme arguments' => array('admin_theme'),
+    'weight' => 10,
+    'type' => MENU_LOCAL_TASK,
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_entity_info().
+ *
+ * {@inheritdoc}
+ */
+function revlinks_entity_info() {
+  $return['revlink'] = array(
+    'label' => t('Revlink'),
+    'plural label' => t('Revlinks'),
+    'entity class' => 'Entity',
+    'controller class' => 'EntityAPIController',
+    'base table' => 'revlinks',
+    'entity keys' => array(
+      'id' => 'revlink_id',
+    ),
+    'label callback' => 'entity_class_label',
+    'uri callback' => 'entity_class_uri',
+  );
+  return $return;
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * {@inheritdoc}
+ */
+function revlinks_form_alter(&$form, &$form_state, $form_id) {
+  // Before showing on edit page, make sure user has access
+  // and content has been parsed.
+  if ( user_access('view revlinks')
+    && isset($form['type']['#value'])
+    && in_array($form['type']['#value'], revlinks_get_parse_types())
+    && !empty($form['nid']['#value']))
+  {
+    $form['revlinks'] = [
+      '#type' => 'fieldset',
+      '#title' => 'Revlinks',
+      '#group' => 'additional_settings',
+    ];
+    $form['revlinks']['revlinks_report'] = [
+      '#title' => 'Revlinks',
+      '#type' => 'markup',
+      '#markup' => revlinks_get_report($form['nid']['#value']),
+    ];
+    return $form;
+  }
+}
+
+/**
+ * Implements hook_cronapi() from Elysia Cron module.
+ *
+ * {@inheritdoc}
+ */
+function revlinks_cronapi($op, $job = NULL) {
+  $items['revlinks_batch_start_elysia'] = array(
+    'description' => 'Batch process Revlinks',
+    //'rule' => '0 */2 * * *', // Every 2 hours
+  );
+  return $items;
+}
+
+/**
+ * Implements hook_node_update().
+ *
+ * Check if we need to add new node to update table.
+ *
+ * {@inheritdoc
+ */
+function revlinks_node_update($node) {
+  // check for published flag, then add to update table.
+  $typesToParse = revlinks_get_parse_types();
+  $type = $node->type;
+  $nid = !empty($node->nid) ? $node->nid : 0;
+  if (revlinks_get_mode() == 'update'
+    && in_array($type, $typesToParse)
+    && $node->status == 1)
+  {
+    // @todo changed from drupal_get_path_alias
+    $path = url('node/' . $nid, ['language' => $node->language]);
+    $title = $node->title;
+    $changed = $node->changed;
+    // @todo check $id val
+    // Node could have been created before but not added to pages table.
+    $id = _revlinks_sql_check_page($nid);
+    $updateType  = (!empty($id)) ? 'Updated' : 'Added';
+    // Returns true/false if record insert/update worked
+    $result = _revlinks_sql_save_page([
+      'id'      => $id,
+      'path'    => $path,
+      'nid'     => $nid,
+      'title'   => $title,
+      'type'    => $type,
+      'changed' => $changed
+    ]);
+    $status = ($result) ? 'Success' : 'Error';
+    watchdog('Revlinks', ':status on :updateType page :page to parse for next run.',
+      [':status' => $status, ':updateType' => $updateType, ':page' => $path],WATCHDOG_INFO);
+  }
+  elseif ($node->original->status == 1
+    && in_array($type, $typesToParse)
+    && $node->status == 0)
+  {
+    // This only runs if previous state (node->original->status was published, and now unpublished).
+    // In between nodes could be added to pages table in default mode now
+    // Delete from update table, can't parse deleted/unpublished nodes
+    _revlinks_sql_delete_pages([$nid]);
+    // Delete any parsed_nid records in links table
+    _revlinks_sql_delete_records([$nid]);
+  }
+}
+
+/**
+ * Implements hook_node_insert().
+ *
+ * Check if we need to add new node to update table.
+ *
+ * {@inheritdoc}
+ */
+function revlinks_node_insert($node) {
+  // Make sure we are in update mode,
+  // since default mode will always get new published nids in hook_node_update..they will be > last parsed nid.
+  // check we are parsing this type and it's published.
+  if (revlinks_get_mode() == 'update'
+    && in_array($node->type, revlinks_get_parse_types())
+    && $node->status == 1)
+  {
+    // New nodes that are published don't have path set yet.
+    $path = url('node/' . $node->nid, ['language' => $node->language]);
+    // Add new page to table
+    $result = _revlinks_sql_save_page([
+      'id'      => NULL,
+      'path'    => $path,
+      'nid'     => $node->nid,
+      'title'   => $node->title,
+      'type'    => $node->type,
+      'changed' => $node->changed
+    ]);
+    $status = ($result) ? 'Success' : 'Error';
+    watchdog('Revlinks', ':status on Adding page :page to parse for next run.',
+      [':status' => $status, ':page' => $path],WATCHDOG_INFO);
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ *
+ * Remove deleted nodes from parsed links and update table.
+ *
+ * {@inheritdoc}
+ */
+function revlinks_node_delete($node) {
+  // Delete from update table, can't parse deleted nodes
+  _revlinks_sql_delete_pages([$node->nid]);
+  // Delete any parsed_nid records in links table
+  _revlinks_sql_delete_records([$node->nid]);
+  // @todo decrement counter var if page was parsed? how would we know it was parsed?
+}

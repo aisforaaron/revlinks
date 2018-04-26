@@ -1,0 +1,9 @@
+{
+    "name": "aisforaaron/revlinks",
+    "description": "Revlinks dependencies.",
+    "type": "library",
+    "require": {
+        "paquettg/php-html-parser": "*",
+        "ezyang/htmlpurifier": "*"
+    }
+}
